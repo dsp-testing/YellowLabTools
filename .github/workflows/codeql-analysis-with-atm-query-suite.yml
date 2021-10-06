@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
 
 env:
-  BASE_URL: 'https://atmcodeqlpublicdata.blob.core.windows.net/atmpublic/query-suite/threshold1-v0.0.2+0f9e88c'
-  CLI_ADDITIONS_CHECKSUM: 'd044ff8700e29fd1076cc3795da24d3a2465e58997820b65636a4753ffaea32f67ea540f61d899d698e6dc5f0562ed16a7921444d6d05b4d436e47a12a63a07d'
-  QLPACK_CHECKSUM: '6230813ceed1d0ea31993340fa607a8dd5c53a967895dcdd92ace1cc7bcb9137935598578592684990a4c6b8811c550a843ae2afb43aed7278920607fe9896ba'
+  BASE_URL: 'https://atmcodeqlpublicdata.blob.core.windows.net/atmpublic/query-suite/v1.0.2.test+274fc78'
+  CLI_ADDITIONS_CHECKSUM: '96e428b689d1aadbdcda6cfc3dbd4ef61472073dff96055ccfdaf621290dc7446b47bfe2f7daf237e852dcc3a476ca3e363b6099fb13b057d93b5d3086ee74cd'
+  MODEL_CHECKSUM: 'dfca9f673afbf58a0b0112693bceb28decbd1014706a71243273e80a770cb35b'
+  QLPACK_CHECKSUM: '7252df5cf1be78cba3525dd8d2b8c78a8a34fc2dfaee249e950252ee56d44a690aaa41919184c1e70c4d391dd28beb8497bc81e85001957baaea45aa3882a57c'
 
 jobs:
   CodeQL-Build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
 
     steps:
       - name: Checkout repository
@@ -39,9 +40,13 @@ jobs:
           ls -lR ${atm_qlpack_path}
 
           # Add ATM query pack to the CodeQL search path
+          # And control RAM management policy
+          # Set verbosity
           CODEQL_CONFIG_FILE="${RUNNER_TEMP}/codeql_config"
           echo "CODEQL_CONFIG_FILE=${CODEQL_CONFIG_FILE}" >> ${GITHUB_ENV}
-          echo "--search-path ${atm_qlpack_path}" >> ${CODEQL_CONFIG_FILE}
+          logdir='${{ github.workspace }}/log'
+          # TODO: the verbosity setting doesn't seem to get through
+          echo "--search-path ${atm_qlpack_path} --off-heap-ram 4096 --verbosity=progress+++ --logdir ${logdir}" >> ${CODEQL_CONFIG_FILE}
 
           echo "ATM CodeQL CLI config file contents:"
           cat ${CODEQL_CONFIG_FILE}
@@ -63,6 +68,7 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
           languages: javascript
           tools: https://github.com/dsp-testing/codeml-testing/releases/download/codeql-bundle-20210615/codeql-bundle-linux64.tar.gz
+          db-location: '${{ github.workspace }}/codeql-database'
 
       - name: Install ATM CLI additions
         env:
@@ -85,16 +91,39 @@ jobs:
 
           ls -lR ${cli_root}/lib-extra
           ls -lR ${cli_root}/ml-models
+          
+          echo "Model properties:"
+          cat ${cli_root}/ml-models/*.qlmodel/model.properties
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v1
-        with:
-          ram: 5120
-          output: '.github/codeql/codeql-javascript-atm/results'
-          threads: 1
+          echo "Checking that the model checksum matches the expected one defined in the 'env'" \
+            "property of the workflow definition"
+          if ! grep -q "checksum=${MODEL_CHECKSUM}" ${cli_root}/ml-models/*.qlmodel/model.properties; then
+            echo "::error::Failed to validate ATM model checksum. Expected checksum=${MODEL_CHECKSUM}, was" \
+              "$(grep 'checksum' ${cli_root}/ml-models/*.qlmodel/model.properties)"
+            exit 1
+          fi
 
-      - name: Upload SARIF results output
-        uses: actions/upload-artifact@v2
-        with:
-          name: javascript-atm.sarif
-          path: .github/codeql/codeql-javascript-atm/results/*.sarif
+#      - name: Perform CodeQL Analysis
+#        uses: github/codeql-action/analyze@v1
+#        with:
+#          ram: 4096
+#          output: '.github/codeql/codeql-javascript-atm/results'
+#          threads: 1
+
+#      - name: Upload SARIF results output
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: javascript-atm.sarif
+#          path: .github/codeql/codeql-javascript-atm/results/*.sarif
+      
+#      - name: Upload CodeQL database
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: codeql-database
+#          path: '${{ github.workspace }}/codeql-database'
+
+#      - name: Upload CodeQL log
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: codeql-log
+#          path: '${{ github.workspace }}/log'
